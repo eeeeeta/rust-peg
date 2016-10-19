@@ -21,3 +21,4 @@ name = "peg_syntax_ext"
 
 [features]
 trace = []
+explicit-failure = []

@@ -7,12 +7,13 @@ grammar -> Grammar
   { Grammar{ imports:imports, rules:rules } }
 
 rule -> Rule
-  = exported:exportflag cached:cacheflag name:identifier returns: returntype equals expression:expression semicolon? {
-      Rule{ name: name, expr: Box::new(expression), ret_type: returns, exported: exported, cached: cached }
+    = expected:expectflag exported:exportflag cached:cacheflag name:identifier returns: returntype equals expression:expression semicolon? {
+      Rule{ name: name, expr: Box::new(expression), ret_type: returns, exported: exported, cached: cached, expected: expected }
     }
 
     exportflag -> bool = ("#[export]"/"#[pub]") __ {true} / "" {false}
     cacheflag -> bool = "#[cache]" __ {true} / {false}
+    expectflag -> String = "#[expected" __ "=" __ s:doubleQuotedString "]" __ {s} / {"".to_string()}
 
 returntype -> String
   = returns tp:(rust_type {match_str.trim().to_string()}) { tp }

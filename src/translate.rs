@@ -29,6 +29,7 @@ pub struct Rule {
 	pub ret_type: String,
 	pub exported: bool,
 	pub cached: bool,
+    pub expected: String
 }
 
 #[derive(Clone)]
@@ -111,7 +112,7 @@ fn make_parse_state(ctxt: &rustast::ExtCtxt, rules: &[Rule]) -> Vec<rustast::P<r
 			$cache_fields
 		}
 	).unwrap());
-
+    let explicit = cfg!(feature = "explicit-failure");
 	items.push(quote_item!(ctxt,
 		impl<'input> ParseState<'input> {
 			fn new() -> ParseState<'input> {
@@ -122,18 +123,25 @@ fn make_parse_state(ctxt: &rustast::ExtCtxt, rules: &[Rule]) -> Vec<rustast::P<r
 					$cache_init
 				}
 			}
-			fn mark_failure(&mut self, pos: usize, expected: &'static str) -> RuleResult<()> {
-				if pos > self.max_err_pos {
-					self.max_err_pos = pos;
-					self.expected.clear();
-				}
+			fn _mark_failure(&mut self, pos: usize, expected: &'static str, expl: bool) -> RuleResult<()> {
+                if expl {
+                    if pos > self.max_err_pos {
+                        self.max_err_pos = pos;
+                        self.expected.clear();
+                    }
 
-				if pos == self.max_err_pos {
-					self.expected.insert(expected);
-				}
-
+                    if pos == self.max_err_pos {
+                        self.expected.insert(expected);
+                    }
+                }
 				Failed
 			}
+	        fn mark_failure(&mut self, pos: usize, expected: &'static str) -> RuleResult<()> {
+                self._mark_failure(pos, expected, !$explicit)
+            }
+	        fn mark_failure_explicit(&mut self, pos: usize, expected: &'static str) -> RuleResult<()> {
+                self._mark_failure(pos, expected, true)
+            }
 		}
 	).unwrap());
 
@@ -302,21 +310,31 @@ fn compile_rule(ctxt: &rustast::ExtCtxt, grammar: &Grammar, rule: &Rule) -> rust
 		})
 	} else { body };
 
-	if rule.cached {
+    let ref xptd = rule.expected;
+    if rule.cached {
 		let cache_field = rustast::str_to_ident(&format!("{}_cache", rule.name));
-
 		quote_item!(ctxt,
 			fn $name<'input>(input: &'input str, state: &mut ParseState<'input>, pos: usize) -> RuleResult<$ret> {
 				let rule_result = $wrapped_body;
 				state.$cache_field.insert(pos, rule_result.clone());
-
+                if let Failed = rule_result {
+                    if $xptd != "" {
+                        state.mark_failure_explicit(pos, $xptd);
+                    }
+                }
 				rule_result
 			}
 		).unwrap()
 	} else {
 		quote_item!(ctxt,
 			fn $name<'input>(input: &'input str, state: &mut ParseState<'input>, pos: usize) -> RuleResult<$ret> {
-				$wrapped_body
+                let rule_result = $wrapped_body;
+                if let Failed = rule_result {
+                    if $xptd != "" {
+                        state.mark_failure_explicit(pos, $xptd);
+                    }
+                }
+                rule_result
 			}
 		).unwrap()
 	}
@@ -639,7 +657,7 @@ fn compile_expr(ctxt: &rustast::ExtCtxt, grammar: &Grammar, e: &Expr, result_use
 								match $code_block {
 									Ok(res) => Matched(pos, res),
 									Err(expected) => {
-										state.mark_failure(pos, expected);
+										state.mark_failure_explicit(pos, expected);
 										Failed
 									},
 								}
